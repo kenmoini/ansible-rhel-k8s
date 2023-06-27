@@ -1,0 +1,184 @@
+---
+
+# ansible-playbook -e mode=create extra-libvirt-vm.yml
+# ansible-playbook -e mode=destroy extra-libvirt-vm.yml
+
+- name: Create a few KVM VMs
+  hosts: localhost # operates against the hypervisor host
+  become: true
+  gather_facts: true
+
+  vars:
+    # Mode: create or destroy
+    # mode: create
+
+    # General operations
+    template_dest: "./.generated" # Where to put the generated files
+    generate_inventory: true # Generate an Ansible inventory file
+    gen_inventory_path: gen_inventory # Where to put the generated inventory file, relative to template_dest
+
+    chown_user: kemo # The local ansible controller user to chown the files to
+    chown_group: kemo # The local ansible controller group to chown the files to
+
+    # Libvirt things
+    install_iso_path: /mnt/ISOs/rhel9.1-x86_64.iso # The path to the RHEL 9 install ISO
+    libvirt_bridge: bridge0 # The libvirt bridge to use
+    disk_size: 60 # The size of the disk in GB
+
+    root_user_password: securePassword # The root user password for the VMs
+
+    node_base_domain: k8s.kemo.labs # The base domain for the loadbalancer VMs' hostnames
+    k8s_apiserver_advertise_address: 192.168.42.60
+
+    # Define the VMs
+    nodes:
+      - name: cp1
+        mode: primary
+        vm:
+          cpu_cores: 4
+          cpu_sockets: 1
+          cpu_threads: 1
+          memory: 8192
+        networking:
+          ip: 192.168.42.61
+          mask: 255.255.255.0
+          gateway: 192.168.42.1
+          dns:
+            - 192.168.42.9
+            - 192.168.42.10
+
+      - name: cp2
+        mode: node
+        vm:
+          cpu_cores: 4
+          cpu_sockets: 1
+          cpu_threads: 1
+          memory: 8192
+        networking:
+          ip: 192.168.42.62
+          mask: 255.255.255.0
+          gateway: 192.168.42.1
+          dns:
+            - 192.168.42.9
+            - 192.168.42.10
+
+      - name: cp3
+        mode: node
+        vm:
+          cpu_cores: 4
+          cpu_sockets: 1
+          cpu_threads: 1
+          memory: 8192
+        networking:
+          ip: 192.168.42.63
+          mask: 255.255.255.0
+          gateway: 192.168.42.1
+          dns:
+            - 192.168.42.9
+            - 192.168.42.10
+
+  tasks:
+    - name: Run Creation functions
+      when: mode == "create"
+      block:
+        - name: CREATE - Make the generation directory
+          ansible.builtin.file:
+            path: "{{ template_dest }}"
+            state: directory
+            mode: 0755
+
+        - name: CREATE - Check for an SSH Keypair
+          ansible.builtin.stat:
+            path: "{{ template_dest }}/id_rsa"
+          register: ssh_keypair
+
+        - name: CREATE - Create an SSH Key pair if it does not exist
+          community.crypto.openssh_keypair:
+            path: "{{ template_dest }}/id_rsa"
+            size: 4096
+          when: not ssh_keypair.stat.exists
+
+        - name: CREATE - Set the permissions of the SSH Key pair - Private
+          ansible.builtin.file:
+            path: "{{ template_dest }}/id_rsa"
+            mode: 0600
+            owner: "{{ chown_user | default(omit) }}"
+            group: "{{ chown_group | default(omit) }}"
+
+        - name: CREATE - Set the permissions of the SSH Key pair - Public
+          ansible.builtin.file:
+            path: "{{ template_dest }}/id_rsa.pub"
+            mode: 0644
+            owner: "{{ chown_user | default(omit) }}"
+            group: "{{ chown_group | default(omit) }}"
+
+        - name: CREATE - Read the SSH public key
+          ansible.builtin.slurp:
+            src: "{{ template_dest }}/id_rsa.pub"
+          register: ssh_pubkey
+
+        - name: CREATE - Generate per-host files
+          ansible.builtin.include_tasks:
+            file: tasks/gen-vm-files.yml
+          loop: "{{ nodes }}"
+          loop_control:
+            loop_var: node
+
+        - name: CREATE - Template Ansible inventory file
+          when: generate_inventory
+          ansible.builtin.template:
+            src: templates/extra-inventory.ini.j2
+            dest: "{{ template_dest }}/{{ gen_inventory_path }}"
+            mode: 0644
+
+        - name: CREATE - Create the VMs
+          ansible.builtin.include_tasks:
+            file: tasks/create-libvirt-vms.yml
+          loop: "{{ nodes }}"
+          loop_control:
+            loop_var: node
+
+    - name: Run Destruction functions
+      when: mode == "destroy"
+      block:
+        - name: DESTROY - List all VMs
+          community.libvirt.virt:
+            command: list_vms
+          register: all_vms
+
+        - name: DESTROY - List only running VMs
+          community.libvirt.virt:
+            command: list_vms
+            state: running
+          register: running_vms
+
+        - name: DESTROY - Turn off the VMs
+          when: node_item.name in running_vms.list_vms
+          community.libvirt.virt:
+            command: destroy
+            name: "{{ node_item.name }}"
+          loop: "{{ nodes }}"
+          loop_control:
+            loop_var: node_item
+            label: "{{ node_item.name }}"
+
+        - name: DESTROY - Undefine the VMs
+          when:
+            - node_item.name in all_vms.list_vms
+          ansible.builtin.shell: |
+            virsh undefine --nvram {{ node_item.name }}
+          loop: "{{ nodes }}"
+          loop_control:
+            loop_var: node_item
+            label: "{{ node_item.name }}"
+
+        - name: DESTROY - Delete the VM disks
+          when:
+            - node_item.name in all_vms.list_vms
+          ansible.builtin.file:
+            path: "{{ libvirt_base_iso_path | default('/var/lib/libvirt/images') }}/{{ node_item.name }}-boot.qcow2"
+            state: absent
+          loop: "{{ nodes }}"
+          loop_control:
+            loop_var: node_item
+            label: "{{ node_item.name }}"

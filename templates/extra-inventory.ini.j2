@@ -1,0 +1,12 @@
+[kube]
+{% for k8snode in nodes %}
+{{ k8snode.name }} ansible_host={{ k8snode.networking.ip }} kubernetes_role={% if k8snode.mode == "primary" %}master{% else %}node{% endif %}
+
+{% endfor %}
+
+[kube:vars]
+ansible_ssh_user=root
+ansible_ssh_private_key_file={{ template_dest }}/id_rsa
+ansible_ssh_common_args='-o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no'
+
+kubernetes_apiserver_advertise_address={{ k8s_apiserver_advertise_address }}
