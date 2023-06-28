@@ -1,0 +1,78 @@
+---
+- name: Deploy Kubernetes to a RHEL system
+  hosts: kube
+  become: yes
+
+  vars:
+    crio_version: 1.24
+    crio_os: CentOS_8_Stream
+
+    kubernetes_version: '1.27'
+    kubernetes_version_rhel_package: '1.27.3'
+
+  tasks:
+
+    - name: Install Cockpit
+      yum:
+        name: cockpit
+        state: latest
+
+    - name: Enable Cockpit
+      service:
+        name: cockpit.socket
+        state: started
+        enabled: yes
+
+    - name: Template /etc/hosts file
+      template:
+        src: templates/etc-hosts.j2
+        dest: /etc/hosts
+        owner: root
+        group: root
+        mode: 0644
+
+    - name: Disable SELinux
+      selinux:
+        state: disabled
+
+    - name: Install CRIO repos
+      ansible.builtin.get_url:
+        url: https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable:/cri-o:/{{ crio_version }}/{{ crio_os }}/devel:kubic:libcontainers:stable:cri-o:{{ crio_version }}.repo
+        dest: /etc/yum.repos.d/devel:kubic:libcontainers:stable:cri-o:{{ crio_version }}.repo
+        mode: 0644
+        owner: root
+        group: root
+
+    - name: Install CRIO repos
+      ansible.builtin.get_url:
+        url: https://mirrorcache-us.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/{{ crio_os }}/devel:kubic:libcontainers:stable.repo
+        dest: /etc/yum.repos.d/devel:kubic:libcontainers:stable:cri-o-stable.repo
+        mode: 0644
+        owner: root
+        group: root
+
+    - name: Install crio
+      yum:
+        name: cri-o
+        state: latest
+
+    - name: Enable the cri-o service
+      service:
+        name: crio
+        state: started
+        enabled: yes
+
+    - name: Include roles - swap
+      ansible.builtin.include_role:
+        name: geerlingguy.swap
+      vars:
+        swap_file_state: absent
+
+    - name: Include roles - repo-epel, security, containerd
+      ansible.builtin.include_role:
+        name: "{{ role_item }}"
+      loop:
+        #- geerlingguy.security
+        - geerlingguy.kubernetes
+      loop_control:
+        loop_var: role_item

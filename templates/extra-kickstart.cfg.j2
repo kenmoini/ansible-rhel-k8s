@@ -5,7 +5,9 @@
 #version=RHEL9
 network --hostname={{ node.name }}.{{ node_base_domain }}
 
-network --bootproto=static --device=enp1s0 --gateway={{ node.networking.gateway }} --ip={{ node.networking.ip }} --nameserver={{ node.networking.dns | join(',') }} --netmask={{ node.networking.mask }} --ipv6=auto --activate
+{% for ntwrk in node.networking %}
+network --bootproto=static --device=enp1s0 --gateway={{ ntwrk.gateway }} {% for eyepee in ntwrk.ips %}--ip={{ eyepee }} {% endfor %}--nameserver={{ ntwrk.dns | join(',') }} --netmask={{ ntwrk.mask }} --ipv6=auto --activate
+{% endfor %}
 
 lang en_US.UTF-8
 keyboard  --xlayouts='us'
