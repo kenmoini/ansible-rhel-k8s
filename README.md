@@ -10,7 +10,7 @@ First you need some RHEL systems - these can be bare metal or virtual.  There's 
 ansible-playbook -e mode=create create-libvirt-vm.yml
 ```
 
-Just wait for the VMs to shut down, then start them back up.
+Just wait for the VMs to shut down, then start them back up, and subscribe them.
 
 ## Deploy Kubernetes
 
