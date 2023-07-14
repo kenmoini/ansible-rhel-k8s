@@ -12,6 +12,18 @@
 
   tasks:
 
+    - name: Subscribe the hosts
+      community.general.redhat_subscription:
+        state: present
+        username: "{{ rhsm_username }}"
+        password: "{{ rhsm_password }}"
+        auto_attach: true
+
+    - name: Do a system update
+      yum:
+        name: '*'
+        state: latest
+
     - name: Install Cockpit
       yum:
         name: cockpit
