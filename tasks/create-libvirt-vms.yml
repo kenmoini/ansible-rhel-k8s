@@ -15,7 +15,15 @@
 #     name: "{{ node.name }}"
 #     state: running
 
-- name: Create the VM
+- name: Check to see if the VM already exists
+  community.libvirt.virt:
+    command: list_vms
+  register: all_vms
+  failed_when: false
+  changed_when: false
+
+- name: Create the VM when it does not exist
+  when: node.name not in all_vms.list_vms
   ansible.builtin.shell: |
     virt-install --connect="qemu:///system" --name={{ node.name }} \
     --vcpus "sockets={{ node.vm.cpu_sockets }},cores={{ node.vm.cpu_cores }},threads={{ node.vm.cpu_threads }}" --memory={{ node.vm.memory }} \
